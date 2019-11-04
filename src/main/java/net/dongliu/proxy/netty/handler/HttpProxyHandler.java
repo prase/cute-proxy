@@ -1,10 +1,33 @@
 package net.dongliu.proxy.netty.handler;
 
+import static io.netty.channel.ChannelOption.CONNECT_TIMEOUT_MILLIS;
+import static io.netty.channel.ChannelOption.SO_KEEPALIVE;
+import static io.netty.handler.codec.http.HttpResponseStatus.BAD_GATEWAY;
+import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
+
+import java.io.File;
+import java.io.IOException;
+import java.net.URL;
+import java.util.ArrayDeque;
+import java.util.Queue;
+import java.util.function.Supplier;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import io.netty.bootstrap.Bootstrap;
-import io.netty.channel.*;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.ChannelInitializer;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
-import io.netty.handler.codec.http.*;
+import io.netty.handler.codec.http.DefaultFullHttpResponse;
+import io.netty.handler.codec.http.HttpClientCodec;
+import io.netty.handler.codec.http.HttpContent;
+import io.netty.handler.codec.http.HttpObject;
+import io.netty.handler.codec.http.HttpRequest;
 import io.netty.handler.proxy.ProxyHandler;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.FutureListener;
@@ -13,24 +36,13 @@ import net.dongliu.commons.net.HostPort;
 import net.dongliu.proxy.MessageListener;
 import net.dongliu.proxy.netty.NettySettings;
 import net.dongliu.proxy.netty.NettyUtils;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.net.URL;
-import java.util.ArrayDeque;
-import java.util.Queue;
-import java.util.function.Supplier;
-
-import static io.netty.channel.ChannelOption.CONNECT_TIMEOUT_MILLIS;
-import static io.netty.channel.ChannelOption.SO_KEEPALIVE;
-import static io.netty.handler.codec.http.HttpResponseStatus.BAD_GATEWAY;
-import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
 
 /**
  * Handle http 1.x proxy request
  */
 public class HttpProxyHandler extends ChannelInboundHandlerAdapter {
     private static final Logger logger = LoggerFactory.getLogger(HttpProxyHandler.class);
+    private static Thread PLAYER_THREAD;
 
     private final Bootstrap bootstrap = new Bootstrap();
     private Channel clientOutChannel;
@@ -40,6 +52,7 @@ public class HttpProxyHandler extends ChannelInboundHandlerAdapter {
 
     private final MessageListener messageListener;
     private final Supplier<ProxyHandler> proxyHandlerSupplier;
+    private String url;
 
     public HttpProxyHandler(MessageListener messageListener, Supplier<ProxyHandler> proxyHandlerSupplier) {
         this.messageListener = messageListener;
@@ -87,16 +100,28 @@ public class HttpProxyHandler extends ChannelInboundHandlerAdapter {
             }
 
             logger.debug("begin creating new connection to {}", address);
-            Future<Channel> future = newChannel(ctx, address);
-            future.addListener((FutureListener<Channel>) f -> {
-                logger.debug("new connection to {} established", address);
-                Channel channel = f.getNow();
-                this.clientOutChannel = channel;
-                this.address = address;
-                channel.writeAndFlush(request);
-                ctx.channel().config().setAutoRead(true);
-                flushQueue();
-            });
+            final String s = url.toExternalForm();
+            if (address.host().contains("s001.bgtv.stream") && url != null && s != null && s.contains("m3u8") && !s.equals(this.url)) {
+                this.url = s;
+                if (PLAYER_THREAD != null && !PLAYER_THREAD.isInterrupted()) {
+                    PLAYER_THREAD.interrupt();
+                    startPlayerThread(this.url, request.headers().get("X-Playback-Session-Id"));
+                } else {
+                    startPlayerThread(this.url, request.headers().get("X-Playback-Session-Id"));
+                }
+            } else {
+                Future<Channel> future = newChannel(ctx, address);
+                future.addListener((FutureListener<Channel>) f -> {
+                    logger.debug("new connection to {} established", address);
+                    Channel channel = f.getNow();
+                    this.clientOutChannel = channel;
+                    this.address = address;
+                    channel.writeAndFlush(request);
+                    ctx.channel().config().setAutoRead(true);
+                    flushQueue();
+                });
+            }
+
             return;
         }
 
@@ -107,6 +132,54 @@ public class HttpProxyHandler extends ChannelInboundHandlerAdapter {
         }
     }
 
+    //    public void start(Stage primaryStage) {
+    //        StackPane root = new StackPane();
+    //        MediaPlayer player = new MediaPlayer(
+    //          new Media(getClass().getResource(arg0).toExternalForm()));
+    //        MediaView mediaView = new MediaView(player);
+    //        root.getChildren().add( mediaView);
+    //        Scene scene = new Scene(root, 1024, 768);
+    //        primaryStage.setScene(scene);
+    //        primaryStage.show();
+    //        player.play();
+    //    }
+
+    private static void startPlayerThread(final String url, final String header) {
+        PLAYER_THREAD = new Thread("player") {
+            protected Process play;
+
+            @Override
+            public void run() {
+                try {
+                    startPlayer();
+                } catch (IOException | InterruptedException e) {
+                    interrupt();
+                }
+            }
+
+            ;
+
+            @Override
+            public void interrupt() {
+                play.destroyForcibly();
+                super.interrupt();
+
+            }
+
+            private void startPlayer() throws IOException, InterruptedException {
+                ProcessBuilder pb = new ProcessBuilder("mpv", "--fs",
+                  "--user-agent='AppleCoreMedia/1.0.0.17A577 (iPhone; U; CPU OS 13_0 like Mac OS X; en_us)'",
+                  "--http-header-fields='X-Playback-Session-Id:" + header + "'", url);
+                pb.inheritIO();
+                pb.redirectError(new File("/tmp/mpv.log"));
+                play = pb.start();
+                play.waitFor();
+            }
+        };
+
+        //PLAYER_THREAD.setDaemon(true);
+        PLAYER_THREAD.start();
+    }
 
     private void flushQueue() {
         if (clientOutChannel == null) {
