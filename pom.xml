@@ -364,7 +364,7 @@
                             <executable>jlink</executable>
                             <arguments>
                                 <argument>--add-modules</argument>
-                                <argument>${mainModuleName},org.slf4j.simple</argument>
+                                <argument>${mainModuleName},org.slf4j.simple,javafx.controls,javafx.graphics,javafx.fxml</argument>
                                 <argument>--module-path</argument>
                                 <argument>${project.build.directory}/libs</argument>
                                 <argument>--output</argument>
@@ -373,7 +373,6 @@
                                 <argument>${project.artifactId}=${mainModuleName}</argument>
                                 <argument>--compress</argument>
                                 <argument>1</argument>
-                                <argument>--strip-debug</argument>
                                 <argument>--ignore-signing-information</argument>
                                 <argument>--no-header-files</argument>
                                 <argument>--no-man-pages</argument>
