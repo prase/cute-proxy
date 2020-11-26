@@ -42,7 +42,7 @@ import net.dongliu.proxy.netty.NettyUtils;
  */
 public class HttpProxyHandler extends ChannelInboundHandlerAdapter {
 	private static final Logger logger = LoggerFactory.getLogger(HttpProxyHandler.class);
-	private static Thread PLAYER_THREAD;
+	public static Thread PLAYER_THREAD;
 
 	private final Bootstrap bootstrap = new Bootstrap();
 	private Channel clientOutChannel;
@@ -101,7 +101,7 @@ public class HttpProxyHandler extends ChannelInboundHandlerAdapter {
 
 			logger.debug("begin creating new connection to {}", address);
 			final String s = url.toExternalForm();
-			if ((address.host().contains("mynbox.tv") || address.host().contains("s001.bgtv.stream")) && url != null && s != null && s.contains("m3u8") && !s.equals(this.url) && !s.contains("wness-hd")) {
+			if (s != null && s.contains("m3u8") && !s.equals(this.url) && !s.contains("wness-hd")) {
 				this.url = s;
 				if (PLAYER_THREAD != null && !PLAYER_THREAD.isInterrupted()) {
 					PLAYER_THREAD.interrupt();
@@ -146,7 +146,7 @@ public class HttpProxyHandler extends ChannelInboundHandlerAdapter {
 	//        player.play();
 	//    }
 
-	private static void startPlayerThread(final String url, final String header) {
+	public static void startPlayerThread(final String url, final String header) {
 		PLAYER_THREAD = new Thread("player") {
 			protected Process play;
 
